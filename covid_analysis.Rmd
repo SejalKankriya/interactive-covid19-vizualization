@@ -1,0 +1,143 @@
+---
+title: "Interactive Mapping of COVID-19 Data"
+date: '2024-03-10'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, results="hide", warning=F, message=F}
+library(data.table)
+library(dplyr)
+library(dplyr)
+library(tidyr)
+library(plotly)
+library(lubridate)
+```
+
+
+# Covid-19 Dataset
+
+Download [us-states.csv](https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-states.csv)
+from <https://github.com/nytimes/covid-19-data/>. 
+[README.md](https://github.com/nytimes/covid-19-data/blob/master/README.md) 
+for details on file content.
+
+```{r}
+# Read us-states.csv
+us_df = fread("us-states.csv")
+```
+
+```{r}
+# Show some values from dataframe 
+head(us_df, 10)
+```
+
+```{r}
+# Create new dataframe with new cases per month for each state
+```
+
+The cases column in us states dataset appears to be cumulative since the cases keeps adding up to the point in time.
+
+```{r}
+us_df$date <- as.Date(us_df$date)
+us_states_cases <- us_df %>%
+  mutate(year_month = format(date, "%Y-%m")) %>%
+  group_by(state, year_month) %>%
+  summarise(cases_per_month = max(cases) - min(cases), .groups = "drop")
+
+# us_states_cases$month <- format(as.Date(paste0(us_states_cases$month, "-01")),"%b-%Y")
+head(us_states_cases, 10)
+```
+
+
+```{r}
+# Using previous dataframe plot new monthly cases in states, group by states
+# The resulting plot is busy, use interactive plotly capabilities to limit number 
+# of displayed states
+
+us_states_cases_new <- us_states_cases %>%
+  mutate(date = as.Date(paste0(year_month, "-01")))
+
+plot_ly(us_states_cases_new, x = ~date, y = ~cases_per_month, color = ~state,
+        type = "scatter", mode = "lines+markers") %>%
+  layout(title = "New Monthly Cases by State",
+         xaxis = list(title = "Year-Month", tickformat = "%b-%Y"),
+         yaxis = list(title = "Cases"))
+```
+
+```{r}
+# Plot new monthly cases only in NY state 
+
+ny_cases <- us_states_cases_new %>%
+  filter(state == "New York")
+
+
+plot_ly(ny_cases, x = ~date, y = ~cases_per_month, type = "scatter", mode = "markers") %>%
+  layout(title = "Monthly Cases in NY",
+         xaxis = list(title = "Year-Month", tickformat = "%b-%Y"),
+         yaxis = list(title = "Cases"))
+```
+
+```{r}
+# Found the year-month with highest cases in NY state 
+
+highest_ny_cases <- us_df %>%
+  filter(state == "New York") %>%
+  mutate(year_month = format(date, "%Y-%m")) %>%
+  group_by(year_month, state, fips) %>%
+  summarise(cases_cum = cumsum(cases),
+            deaths_cum = cumsum(deaths),
+            cases = max(cases) - min(cases), .groups = "drop_last") %>%
+  arrange(desc(cases)) %>%
+  select(state, year_month, fips, cases_cum, deaths_cum, cases)
+
+highest_ny <- head(highest_ny_cases, 1)
+highest_ny
+```
+
+```{r}
+# Plot new cases in determined above year-month
+# using USA state map, color each state by number of cases
+
+us_states_cases$code = state.abb[match(us_states_cases$state, state.name)]
+
+plot_ly(
+  type = "choropleth",
+  locations = us_states_cases$code,
+  locationmode = "USA-states",
+  z = us_states_cases$cases_per_month*200,
+  zmin = 0,
+  zmax = max(us_states_cases$cases_per_month),
+  text = us_states_cases$state) %>%
+  colorbar(title = "Cases per Month", tickformat = ",", tickvals = c(1000000, 2000000), ticktext = c("1M", "2M")) %>%
+  layout(
+    title = "COVID-19 Cases by State",
+    geo = list(scope = "usa", projection = list(type = "albers usa"), lakecolor = toRGB("white"))
+  )
+```
+
+
+```{r}
+#Add animation capability 
+
+plot_ly(
+  type = "choropleth",
+  locations = us_states_cases$code,
+  locationmode = "USA-states",
+  z = us_states_cases$cases_per_month*200,
+  zmin = 0,
+  zmax = max(us_states_cases$cases_per_month),
+  text = us_states_cases$state,
+  animation_frame = us_states_cases$year_month,
+  colorbar = list(title = "Cases per Month", tickformat = ",", tickvals = c(1000000, 2000000), ticktext = c("1M", "2M"))
+) %>%
+  layout(
+    title = "COVID-19 Cases by State",
+    geo = list(scope = "usa", projection = list(type = "albers usa"), lakecolor = toRGB("white"))
+  )
+```
+
+An animated plot can we useful when we want to see cases evolving with time in different states in USA. This can benefit to see the progression of cases over time, with the ability to identify patterns that may be difficult from the static plots.
+Whereas, the static plot, is useful when we want to show the data at a specific point in time. It may be effective when we just need a snapshot of the data at specific instance. This is useful when we want to show the states affected the most.
